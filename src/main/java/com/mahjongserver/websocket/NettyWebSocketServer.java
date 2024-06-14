@@ -1,6 +1,12 @@
 package com.mahjongserver.websocket;
 
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.mahjongserver.Entity.User;
+import com.mahjongserver.pojo.GetUserCacheMessage;
+import com.mahjongserver.pojo.LoginMessage;
+import com.mahjongserver.pojo.RegisterGuestMessage;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -13,7 +19,9 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import com.google.gson.Gson;
 
+import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.mahjongserver.Login.LoginManager;
@@ -84,23 +92,32 @@ public class NettyWebSocketServer {
     // 处理 WebSocket 帧
     private void handleWebSocketFrame(ChannelHandlerContext ctx, TextWebSocketFrame frame) {
         String request = frame.text();
-        Map<String, String> response = new HashMap<>();
+        Map<String, Object> response = new HashMap<>();
 
         try {
-            Map<String, String> message = gson.fromJson(request, Map.class);
-            String action = message.get("action");
+            if (request == null || request.isEmpty()) {
+                throw new IllegalArgumentException("Request string is null or empty");
+            }
+
+            JsonObject jsonObject = JsonParser.parseString(request).getAsJsonObject();
+            String action = jsonObject.get("action").getAsString();
 
             if ("registerGuest".equals(action)) {
+                RegisterGuestMessage registerGuestMessage = gson.fromJson(jsonObject, RegisterGuestMessage.class);
                 int guestId = loginManager.registerGuest();
                 response.put("action", "registerGuest");
-                response.put("success", "true");
-                response.put("id", String.valueOf(guestId)); // 返回生成的ID，确保是字符串
+                response.put("success", true);
+                response.put("id", guestId); // 返回生成的ID，确保是整数类型
             } else if ("login".equals(action)) {
-                String userid = message.get("userid");
-                String password = message.get("password");
+                LoginMessage loginMessage = gson.fromJson(jsonObject, LoginMessage.class);
+                String userid = loginMessage.getUserid();
+                String password = loginMessage.getPassword();
+
+                System.out.println("用户Id: " + userid + "，密码: " + password);
+
                 boolean loginSuccess = loginManager.login(userid, password);
                 response.put("action", "login");
-                response.put("success", String.valueOf(loginSuccess));
+                response.put("success", loginSuccess);
 
                 if (loginSuccess) {
                     String username = loginManager.getUsernameById(userid);
@@ -111,16 +128,31 @@ public class NettyWebSocketServer {
                     response.put("message", "Invalid userid or password.");
                     System.out.println("Login failed: Invalid userid or password.");
                 }
+            } else if ("getUserCache".equals(action)) {
+                GetUserCacheMessage getUserCacheMessage = gson.fromJson(jsonObject, GetUserCacheMessage.class);
+                Map<String, String> userCache = loginManager.getUserCache();
+                response.put("action", "getUserCache");
+                response.put("success", true);
+                response.put("userCache", userCache); // 返回实际的数据
             } else {
                 response.put("action", "unknown");
-                response.put("success", "false");
+                response.put("success", false);
                 response.put("message", "Unknown action: " + action);
             }
+        } catch (IllegalArgumentException e) {
+            response.put("action", "error");
+            response.put("success", false);
+            response.put("message", e.getMessage());
+        } catch (SQLException e) {
+            e.printStackTrace();
+            response.put("action", "error");
+            response.put("success", false);
+            response.put("message", e.getMessage());
         } catch (Exception e) {
             e.printStackTrace();
             response.put("action", "error");
-            response.put("success", "false");
-            response.put("message", e.getMessage());
+            response.put("success", false);
+            response.put("message", "Internal server error: " + e.getMessage());
         }
 
         ctx.channel().writeAndFlush(new TextWebSocketFrame(gson.toJson(response)));
