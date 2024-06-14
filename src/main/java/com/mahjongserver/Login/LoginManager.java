@@ -52,6 +52,7 @@ public class LoginManager {
 
     // 注册游客账号
     public int registerGuest() throws SQLException {
+        int ttlSeconds=3600;
         try (SqlSession session = sqlSessionFactory.openSession()) {
             UserMapper userMapper = session.getMapper(UserMapper.class);
             User user = new User();
@@ -61,6 +62,7 @@ public class LoginManager {
             session.commit();
             try (Jedis jedis = RedisUtil.getJedis()) {
                 jedis.hset("userCache", String.valueOf(user.getUserId()), user.getPassword());
+                jedis.expire("userCache", ttlSeconds);
             }
             return user.getUserId();
         }
